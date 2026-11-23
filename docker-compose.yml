@@ -1,0 +1,56 @@
+# Runs the infrastructure for the heartbeat pipeline:
+#   - Kafka      : message broker (producer -> topic -> consumer)
+#                  runs in KRaft mode, so no Zookeeper is needed
+#   - PostgreSQL : stores the validated heart rate readings
+#
+# Start:  docker compose up -d
+# Stop:   docker compose down        (keeps database data)
+# Reset:  docker compose down -v     (also deletes database data)
+
+services:
+  kafka:
+    image: apache/kafka:4.0.0
+    container_name: kafka
+    ports:
+      # Port your Python scripts on Windows connect to
+      - "9092:9092"
+    environment:
+      # --- KRaft: this single node is both broker and controller ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # --- Listeners ---
+      #   PLAINTEXT      -> used inside the Docker network (kafka:29092)
+      #   PLAINTEXT_HOST -> used from your machine (localhost:9092)
+      #   CONTROLLER     -> internal KRaft metadata traffic (kafka:29093)
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # --- Single node, so internal topics can only have 1 copy ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      # Values come from the .env file in the project root
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      # Keeps database data between restarts
+      - postgres_data:/var/lib/postgresql/data
+      # Any .sql file in ./sql runs automatically the FIRST time the database is created
+      - ./sql:/docker-entrypoint-initdb.d
+
+volumes:
+  postgres_data:
