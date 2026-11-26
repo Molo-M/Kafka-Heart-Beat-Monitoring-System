@@ -12,6 +12,8 @@ Stop with Ctrl+C.
 """
 
 import json
+import sys
+import traceback
 from datetime import datetime, timezone
 
 import psycopg2
@@ -19,6 +21,7 @@ from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 
 import config
+from alerts import send_alert
 
 # --- Validation rules ---
 # Readings outside this range are impossible or broken data -> rejected
@@ -125,15 +128,20 @@ def main():
     except psycopg2.OperationalError as error:
         print(f"Could not connect to PostgreSQL: {error}")
         print("Is Docker running? Check with: docker compose ps")
-        return
+        send_alert("Consumer could not start", f"Could not connect to PostgreSQL:\n{error}")
+        sys.exit(1)
 
     try:
         consumer = create_consumer()
-    except KafkaError:
+    except KafkaError as error:
         print(f"Could not connect to Kafka at {config.KAFKA_BOOTSTRAP_SERVERS}.")
         print("Is Docker running? Check with: docker compose ps")
         db_connection.close()
-        return
+        send_alert(
+            "Consumer could not start",
+            f"Could not connect to Kafka at {config.KAFKA_BOOTSTRAP_SERVERS}:\n{error!r}",
+        )
+        sys.exit(1)
 
     cursor = db_connection.cursor()
     print(f"Connected. Listening to topic '{config.KAFKA_TOPIC}'. Press Ctrl+C to stop.\n")
@@ -141,6 +149,7 @@ def main():
     inserted_count = 0
     anomaly_count = 0
     rejected_count = 0
+    failed = False
 
     try:
         # This loop waits for new messages and never ends on its own
@@ -184,6 +193,21 @@ def main():
 
     except KeyboardInterrupt:
         print("\nStopping consumer.")
+
+    except Exception as error:
+        # Anything else is a real failure (e.g. the database went down).
+        # The current message was NOT committed, so Kafka will deliver it
+        # again when the consumer is restarted: nothing is lost.
+        failed = True
+        print(f"\nCONSUMER FAILED: {error!r}")
+        send_alert(
+            "Consumer failed",
+            f"The consumer stopped because of an error:\n{error!r}\n\n"
+            f"Processed before the failure: {inserted_count} inserted "
+            f"({anomaly_count} anomalies), {rejected_count} rejected.\n\n"
+            f"Details:\n{traceback.format_exc()}",
+        )
+
     finally:
         print(
             f"Summary: {inserted_count} inserted "
@@ -192,6 +216,9 @@ def main():
         consumer.close()
         cursor.close()
         db_connection.close()
+
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

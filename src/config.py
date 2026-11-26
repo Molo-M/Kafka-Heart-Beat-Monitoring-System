@@ -27,3 +27,11 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "heartbeat_pass")
 # --- Data generator ---
 NUM_CUSTOMERS = int(os.getenv("NUM_CUSTOMERS", "10"))
 SEND_INTERVAL_SECONDS = float(os.getenv("SEND_INTERVAL_SECONDS", "1"))
+
+# --- Email alerts ---
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+ALERT_EMAIL_SENDER = os.getenv("ALERT_EMAIL_SENDER", "")
+# Gmail shows App Passwords with spaces ("abcd efgh ..."); remove them
+ALERT_EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASSWORD", "").replace(" ", "")
+ALERT_EMAIL_RECIPIENT = os.getenv("ALERT_EMAIL_RECIPIENT", "")
