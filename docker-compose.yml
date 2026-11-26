@@ -1,6 +1,7 @@
 # Runs the infrastructure for the heartbeat pipeline:
 #   - Kafka      : message broker (producer -> topic -> consumer)
 #                  runs in KRaft mode, so no Zookeeper is needed
+#   - Kafka UI   : optional web UI for exploring Kafka (http://localhost:8080)
 #   - PostgreSQL : stores the validated heart rate readings
 #
 # Start:  docker compose up -d
@@ -35,6 +36,19 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  kafka-ui:
+    # Optional web UI for exploring Kafka: http://localhost:8080
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: heartbeat-local
+      # The UI runs inside Docker, so it uses Kafka's internal listener
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
   postgres:
     image: postgres:16
