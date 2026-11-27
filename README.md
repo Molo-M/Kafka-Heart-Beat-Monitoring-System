@@ -13,13 +13,14 @@ Data Generator → Kafka Producer → Kafka Topic → Kafka Consumer → Postgre
 
 | Deliverable | Link |
 |---|---|
-| Synthetic data generator | [`src/data_generator.py`](src/data_generator.py) |
-| Kafka producer | [`src/producer.py`](src/producer.py) |
-| Kafka consumer | [`src/consumer.py`](src/consumer.py) |
-| Database schema (SQL) | [`sql/schema.sql`](sql/schema.sql) |
-| Docker Compose file | [`docker-compose.yml`](docker-compose.yml) |
+| Project Description (Requirements) | [Project-Description.md](Project-Description.md) |
+| Synthetic data generator | [src/data_generator.py](src/data_generator.py) |
+| Kafka producer | [src/producer.py](src/producer.py) |
+| Kafka consumer | [src/consumer.py](src/consumer.py) |
+| Database schema (SQL) | [sql/schema.sql](sql/schema.sql) |
+| Docker Compose file | [docker-compose.yml](docker-compose.yml) |
 | Setup guide and documentation | [Setup Guide](#setup-guide) and [How It Works](#how-it-works) |
-| Architecture diagram | [`docs/images/architecture-diagram.png`](docs/images/architecture-diagram.png) |
+| Architecture diagram | [docs/images/architecture-diagram.png](docs/images/architecture-diagram.png) |
 | Data flow diagram | [`docs/images/data-flow-diagram.png`](docs/images/data-flow-diagram.png) |
 | Test scripts | [`tests/`](tests/) |
 | Sample outputs and screenshots | [Screenshots](#screenshots) and [`docs/images/`](docs/images/) |
