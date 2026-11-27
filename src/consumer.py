@@ -6,6 +6,9 @@ Reads messages from the Kafka topic and, for each one:
   2. Flags it as an anomaly if the heart rate is outside the normal range.
   3. Inserts valid readings into PostgreSQL; invalid ones are logged and skipped.
 
+If something goes wrong (e.g. the database goes down), it retries
+PIPELINE_RETRIES times before giving up and sending an alert email.
+
 Run from the project root:
     python src/consumer.py
 Stop with Ctrl+C.
@@ -13,15 +16,13 @@ Stop with Ctrl+C.
 
 import json
 import sys
-import traceback
 from datetime import datetime, timezone
 
 import psycopg2
 from kafka import KafkaConsumer
-from kafka.errors import KafkaError
 
 import config
-from alerts import send_alert
+from retry import run_with_retries
 
 # --- Validation rules ---
 # Readings outside this range are impossible or broken data -> rejected
@@ -122,34 +123,22 @@ def create_consumer():
     )
 
 
-def main():
-    try:
-        db_connection = connect_to_database()
-    except psycopg2.OperationalError as error:
-        print(f"Could not connect to PostgreSQL: {error}")
-        print("Is Docker running? Check with: docker compose ps")
-        send_alert("Consumer could not start", f"Could not connect to PostgreSQL:\n{error}")
-        sys.exit(1)
+def run_consumer(stats):
+    """
+    One attempt: connect, then process messages until an error happens.
 
+    stats is a dictionary of counters, shared across attempts so the
+    totals keep growing after a retry.
+    """
+    db_connection = connect_to_database()
     try:
         consumer = create_consumer()
-    except KafkaError as error:
-        print(f"Could not connect to Kafka at {config.KAFKA_BOOTSTRAP_SERVERS}.")
-        print("Is Docker running? Check with: docker compose ps")
+    except Exception:
         db_connection.close()
-        send_alert(
-            "Consumer could not start",
-            f"Could not connect to Kafka at {config.KAFKA_BOOTSTRAP_SERVERS}:\n{error!r}",
-        )
-        sys.exit(1)
+        raise
 
     cursor = db_connection.cursor()
     print(f"Connected. Listening to topic '{config.KAFKA_TOPIC}'. Press Ctrl+C to stop.\n")
-
-    inserted_count = 0
-    anomaly_count = 0
-    rejected_count = 0
-    failed = False
 
     try:
         # This loop waits for new messages and never ends on its own
@@ -157,7 +146,7 @@ def main():
             try:
                 reading = parse_and_validate(message.value)
             except ValueError as reason:
-                rejected_count += 1
+                stats["rejected"] += 1
                 print(f"REJECTED ({reason}): {message.value!r}")
             else:
                 anomaly = is_anomaly(reading["heart_rate"])
@@ -175,13 +164,13 @@ def main():
                 except (psycopg2.DataError, psycopg2.IntegrityError) as error:
                     # The database refused the row (e.g. the CHECK constraint)
                     db_connection.rollback()
-                    rejected_count += 1
+                    stats["rejected"] += 1
                     print(f"REJECTED by database ({error.pgerror}): {reading}")
                 else:
-                    inserted_count += 1
+                    stats["inserted"] += 1
                     label = "ANOMALY " if anomaly else "Inserted"
                     if anomaly:
-                        anomaly_count += 1
+                        stats["anomalies"] += 1
                     print(
                         f"{label} | {reading['customer_id']} | "
                         f"{reading['heart_rate']} bpm | {reading['recorded_at']}"
@@ -191,33 +180,34 @@ def main():
             # Kafka not to deliver it to this group again
             consumer.commit()
 
-    except KeyboardInterrupt:
-        print("\nStopping consumer.")
-
-    except Exception as error:
-        # Anything else is a real failure (e.g. the database went down).
-        # The current message was NOT committed, so Kafka will deliver it
-        # again when the consumer is restarted: nothing is lost.
-        failed = True
-        print(f"\nCONSUMER FAILED: {error!r}")
-        send_alert(
-            "Consumer failed",
-            f"The consumer stopped because of an error:\n{error!r}\n\n"
-            f"Processed before the failure: {inserted_count} inserted "
-            f"({anomaly_count} anomalies), {rejected_count} rejected.\n\n"
-            f"Details:\n{traceback.format_exc()}",
-        )
-
+    # Any other error (e.g. the database went down) leaves this function.
+    # The current message was NOT committed, so Kafka will deliver it
+    # again on the next attempt: nothing is lost.
     finally:
-        print(
-            f"Summary: {inserted_count} inserted "
-            f"({anomaly_count} anomalies), {rejected_count} rejected."
-        )
         consumer.close()
         cursor.close()
         db_connection.close()
 
-    if failed:
+
+def main():
+    stats = {"inserted": 0, "anomalies": 0, "rejected": 0}
+    succeeded = True
+
+    try:
+        succeeded = run_with_retries(
+            "Consumer",
+            attempt=lambda: run_consumer(stats),
+            get_progress=lambda: stats["inserted"] + stats["rejected"],
+        )
+    except KeyboardInterrupt:
+        print("\nStopping consumer.")
+    finally:
+        print(
+            f"Summary: {stats['inserted']} inserted "
+            f"({stats['anomalies']} anomalies), {stats['rejected']} rejected."
+        )
+
+    if not succeeded:
         sys.exit(1)
 
 

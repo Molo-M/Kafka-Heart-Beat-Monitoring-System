@@ -35,3 +35,9 @@ ALERT_EMAIL_SENDER = os.getenv("ALERT_EMAIL_SENDER", "")
 # Gmail shows App Passwords with spaces ("abcd efgh ..."); remove them
 ALERT_EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASSWORD", "").replace(" ", "")
 ALERT_EMAIL_RECIPIENT = os.getenv("ALERT_EMAIL_RECIPIENT", "")
+
+# --- Retries (like Airflow's "retries" and "retry_delay") ---
+# How many times to retry after the first failure before sending an alert
+PIPELINE_RETRIES = int(os.getenv("PIPELINE_RETRIES", "3"))
+# Seconds to wait between attempts
+PIPELINE_RETRY_DELAY_SECONDS = float(os.getenv("PIPELINE_RETRY_DELAY_SECONDS", "10"))

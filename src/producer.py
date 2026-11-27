@@ -5,6 +5,9 @@ Uses the data generator to create readings for every customer and sends
 each one to the Kafka topic as a JSON message, continuously, to simulate
 a real-time feed from heart rate monitors.
 
+If something goes wrong (e.g. Kafka becomes unreachable), it retries
+PIPELINE_RETRIES times before giving up and sending an alert email.
+
 Run from the project root:
     python src/producer.py
 Stop with Ctrl+C.
@@ -13,14 +16,13 @@ Stop with Ctrl+C.
 import json
 import sys
 import time
-import traceback
 
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
 import config
-from alerts import send_alert
 from data_generator import create_customers, generate_reading
+from retry import run_with_retries
 
 
 def create_producer():
@@ -41,24 +43,17 @@ def to_message(reading):
     return key, value
 
 
-def main():
-    try:
-        producer = create_producer()
-    except KafkaError as error:
-        print(f"Could not connect to Kafka at {config.KAFKA_BOOTSTRAP_SERVERS}.")
-        print("Is Docker running? Check with: docker compose ps")
-        send_alert(
-            "Producer could not start",
-            f"Could not connect to Kafka at {config.KAFKA_BOOTSTRAP_SERVERS}:\n{error!r}",
-        )
-        sys.exit(1)
+def run_producer(customers, stats):
+    """
+    One attempt: connect, then send readings until an error happens.
 
-    customers = create_customers(config.NUM_CUSTOMERS)
+    stats is a dictionary of counters, shared across attempts so the
+    totals keep growing after a retry.
+    """
+    producer = create_producer()
     print(f"Connected to Kafka. Sending to topic '{config.KAFKA_TOPIC}'.")
     print(f"Simulating {len(customers)} customers. Press Ctrl+C to stop.\n")
 
-    sent_count = 0
-    failed = False
     try:
         while True:
             results = []
@@ -68,8 +63,8 @@ def main():
                 # The customer ID is used as the message key
                 key, value = to_message(reading)
                 results.append(producer.send(config.KAFKA_TOPIC, key=key, value=value))
-                sent_count += 1
-                print(f"Sent #{sent_count}: {reading}")
+                stats["sent"] += 1
+                print(f"Sent #{stats['sent']}: {reading}")
 
             # send() works in the background; flush() waits until this
             # round of messages has actually reached Kafka (or failed)
@@ -78,22 +73,9 @@ def main():
             # Raise an error if any message in this round could not be delivered
             for result in results:
                 result.get()
+                stats["delivered"] += 1
 
             time.sleep(config.SEND_INTERVAL_SECONDS)
-
-    except KeyboardInterrupt:
-        print(f"\nStopping producer. Total messages sent: {sent_count}")
-
-    except Exception as error:
-        # Anything else is a real failure (e.g. Kafka became unreachable)
-        failed = True
-        print(f"\nPRODUCER FAILED: {error!r}")
-        send_alert(
-            "Producer failed",
-            f"The producer stopped because of an error:\n{error!r}\n\n"
-            f"Messages sent before the failure: {sent_count}\n\n"
-            f"Details:\n{traceback.format_exc()}",
-        )
 
     finally:
         # Deliver anything still waiting (giving up after 10 seconds if
@@ -104,7 +86,25 @@ def main():
             print("Some messages could not be delivered before shutdown.")
         producer.close(timeout=10)
 
-    if failed:
+
+def main():
+    # Created once, so the same customers continue after a retry
+    customers = create_customers(config.NUM_CUSTOMERS)
+    stats = {"sent": 0, "delivered": 0}
+    succeeded = True
+
+    try:
+        succeeded = run_with_retries(
+            "Producer",
+            attempt=lambda: run_producer(customers, stats),
+            get_progress=lambda: stats["delivered"],
+        )
+    except KeyboardInterrupt:
+        print("\nStopping producer.")
+    finally:
+        print(f"Total messages delivered to Kafka: {stats['delivered']}")
+
+    if not succeeded:
         sys.exit(1)
 
 
