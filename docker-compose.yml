@@ -3,6 +3,7 @@
 #                  runs in KRaft mode, so no Zookeeper is needed
 #   - Kafka UI   : optional web UI for exploring Kafka (http://localhost:8080)
 #   - PostgreSQL : stores the validated heart rate readings
+#   - Grafana    : dashboard showing the stored readings (http://localhost:3000)
 #
 # Start:  docker compose up -d
 # Stop:   docker compose down        (keeps database data)
@@ -66,5 +67,28 @@ services:
       # Any .sql file in ./sql runs automatically the FIRST time the database is created
       - ./sql:/docker-entrypoint-initdb.d
 
+  grafana:
+    image: grafana/grafana:13.3.1
+    container_name: grafana
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    environment:
+      # Login for the Grafana website (only applied the FIRST time Grafana starts)
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Passed in so the data source file can connect to PostgreSQL
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Keeps Grafana's own settings and users between restarts
+      - grafana_data:/var/lib/grafana
+      # Data source and dashboard set-up, loaded automatically on start
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/dashboards
+
 volumes:
   postgres_data:
+  grafana_data:

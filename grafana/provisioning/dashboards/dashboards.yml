@@ -1,0 +1,13 @@
+# Tells Grafana to load every dashboard JSON file in /etc/grafana/dashboards
+# (the grafana/dashboards folder of this project, mounted by docker-compose.yml).
+apiVersion: 1
+
+providers:
+  - name: heartbeat-dashboards
+    type: file
+    # Allows editing in the browser; export the JSON back to the file to keep changes
+    allowUiUpdates: true
+    # Check the folder for changes every 30 seconds
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
