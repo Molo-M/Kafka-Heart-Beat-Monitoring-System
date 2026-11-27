@@ -1,0 +1,21 @@
+# Tells Grafana how to connect to our PostgreSQL database.
+# Loaded automatically when Grafana starts.
+apiVersion: 1
+
+datasources:
+  - name: Heartbeat PostgreSQL
+    type: grafana-postgresql-datasource
+    uid: heartbeat-postgres          # the dashboard refers to the data source by this ID
+    isDefault: true
+    # Grafana runs inside Docker, so it reaches PostgreSQL by its service
+    # name and the container's own port (5432), not localhost:5433
+    url: postgres:5432
+    # $__env{...} reads values passed to the Grafana container from .env
+    user: $__env{POSTGRES_USER}
+    secureJsonData:
+      password: $__env{POSTGRES_PASSWORD}
+    jsonData:
+      database: $__env{POSTGRES_DB}
+      sslmode: disable               # fine for a local Docker network only
+      postgresVersion: 1600
+      timescaledb: false
