@@ -6,8 +6,11 @@
 #   - Grafana    : dashboard showing the stored readings (http://localhost:3000)
 #
 # Start:  docker compose up -d
-# Stop:   docker compose down        (keeps database data)
-# Reset:  docker compose down -v     (also deletes database data)
+# Pause:  docker compose stop        (keeps everything; resume with: docker compose start)
+# Stop:   docker compose down        (keeps PostgreSQL and Grafana data, but DELETES Kafka's
+#                                     topic and messages, since Kafka has no volume:
+#                                     recreate the topic afterwards)
+# Reset:  docker compose down -v     (also deletes PostgreSQL and Grafana data)
 
 services:
   kafka:
